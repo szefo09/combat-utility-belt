@@ -69,7 +69,9 @@ export class Concentrator {
             Concentrator._notifyDoubleConcentration(actor);
         } else {
             // Otherwise, add the Concentrating condition
-            EnhancedConditions.addCondition(conditionName, actor, {warn: false});
+            EnhancedConditions.addCondition(conditionName, actor, {warn: false}).then(()=>
+            Concentrator._updateConcentrationDuration(actor, item, conditionName,item.uuid)
+        );
         }
 
         // Finally, set a flag that this message has been processed
@@ -186,17 +188,17 @@ export class Concentrator {
 
         const damageAmount = getProperty(options, `${NAME}.${FLAGS.concentrator.damageAmount}`);
         const isDead = getProperty(options, `${NAME}.${FLAGS.concentrator.isDead}`);
+        const halfDamage = Math.floor(damageAmount / 2);
+        const dc = halfDamage > 10 ? halfDamage : 10;
 
         if (outputChat) {
             if (isDead) return Concentrator._processDeath(entity);
 
-            Concentrator._displayChat(entity, damageAmount);
+            Concentrator._displayChat(entity, dc);
         }
 
         if (displayPrompt) {
-            const actor = entity instanceof Actor ? entity : entity.actor;
-
-            return Concentrator._determinePromptedUsers(actor.id);
+            return Concentrator._determinePromptedUsers(entity,dc);
         }
     }
 
@@ -205,17 +207,30 @@ export class Concentrator {
      * @param {*} entity 
      */
     static async _processDeath(entity) {
-        const conditionName = Sidekick.getSetting(SETTING_KEYS.concentrator.conditionName);
-        await EnhancedConditions.removeCondition(conditionName, entity);
+        await Concentrator._processFailDC(entity);
 
         return Concentrator._displayDeathChat(entity);
     }
-
+    /**
+     * Processes the steps necessary when the concentrating token failed the save DC.
+     * @param {*} entity 
+     */
+    static async _processFailDC(entity){
+        const conditionName = Sidekick.getSetting(SETTING_KEYS.concentrator.conditionName);
+        const actor = entity instanceof Actor ? entity : (entity instanceof Token || entity instanceof TokenDocument) ? entity.actor : null;
+        const concentrationItemUuid=actor.effects.find(x=>x.data.label==conditionName)?.data.flags.concentrator?.ItemUuid;
+        const concentrationStartTime=actor.effects.find(x=>x.data.label==conditionName)?.data.duration?.startTime;
+        if(concentrationItemUuid){
+            Concentrator._removeDependantEffects(concentrationItemUuid,concentrationStartTime);
+        }
+        await EnhancedConditions.removeCondition(conditionName, entity);
+    }
     /**
      * Distributes concentration prompts to affected users
      * @param {*} options 
      */
-    static _determinePromptedUsers(actorId){
+    static _determinePromptedUsers(entity,dc){
+        const actorId = entity instanceof Actor ? entity.id : entity.actor.id;
         if (!actorId) return;
 
         const actor = game.actors.get(actorId);
@@ -231,17 +246,17 @@ export class Concentrator {
 
         const ownerIds = owners.map(u => u.id);
 
-        return Concentrator._distributePrompts(actorId, ownerIds);
+        return Concentrator._distributePrompts(entity, actorId, ownerIds, dc);
     }
 
     /**
      * Distribute concentration prompts to affected users
-     * @param {*} actorId 
+     * @param {*} entity 
      * @param {*} users 
      */
-    static _distributePrompts(actorId, userIds){
+    static _distributePrompts(entity, actorId, userIds, dc){
         for (const uId of userIds) {
-            Concentrator._displayPrompt(actorId, uId);
+            Concentrator._displayPrompt(entity, actorId, uId, dc);
         }
     }
 
@@ -250,7 +265,7 @@ export class Concentrator {
      * @param {*} actorId 
      * @param {*} userId 
      */
-    static _displayPrompt(actorId, userId){
+    static _displayPrompt(entity, actorId, userId, dc){
         const actor = game.actors.get(actorId);
         const ability = Sidekick.getSetting(SETTING_KEYS.concentrator.concentrationAttribute);
 
@@ -266,7 +281,12 @@ export class Concentrator {
                     label: "Yes",
                     icon: `<i class="fas fa-check"></i>`,
                     callback: e => {
-                        actor.rollAbilitySave(ability);
+                        actor.rollAbilitySave(ability).then(result=>{
+                            if(result.total>=dc){
+                                return;
+                            }
+                            return Concentrator._processFailDC(entity);
+                    });
                     }
                 },
                 no: {
@@ -284,15 +304,13 @@ export class Concentrator {
     /**
      * Displays a chat message for concentration checks
      * @param {*} entity
-     * @param {*} damage
+     * @param {*} dc
      */
-    static _displayChat(entity, damage){
+    static _displayChat(entity, dc){
         if (!game.user.isGM) return;
 
         const isActor = entity instanceof Actor;
         const isToken = entity instanceof Token || entity instanceof TokenDocument;
-        const halfDamage = Math.floor(damage / 2);
-        const dc = halfDamage > 10 ? halfDamage : 10;
         const user = game.userId;
         const speaker = isActor ? ChatMessage.getSpeaker({actor: entity}) : isToken ? ChatMessage.getSpeaker({token: entity}) : ChatMessage.getSpeaker();
         const content = `<h3>Concentrator</header></h3>${entity.name} took damage and their concentration is being tested (DC${dc})!</p>`;
@@ -323,7 +341,7 @@ export class Concentrator {
      * @param {*} entity  the entity with double concentration
      */
     static _notifyDoubleConcentration(entity) {
-        const isWhisper = Sidekick.getSetting(SETTING_KEYS.concentrator.notifyDouble) === "GM Only";
+        const isWhisper = Sidekick.getSetting(SETTING_KEYS.concentrator.notifyDouble) === "gm";
         const isActor = entity instanceof Actor;
         const isToken = entity instanceof Token || entity instanceof TokenDocument;
         const speaker = isActor ? ChatMessage.getSpeaker({actor: entity}) : isToken ? ChatMessage.getSpeaker({token: entity}) : ChatMessage.getSpeaker();
@@ -333,6 +351,60 @@ export class Concentrator {
 
         return ChatMessage.create({speaker, whisper, content, type});
     }
+    static async _updateConcentrationDuration(entity,item, conditionName,itemUuid) {
+        let effect = entity?.temporaryEffects.find(x=>x.data.label==conditionName)
+        await effect.update({duration:{seconds:null, rounds: null, startRound:null,startTime:null,turns:null, startTurn:null}});
+        let Spellduration = getProperty(item, `data.data.duration`);
+        if(!Spellduration){
+         await effect.update({flags:{concentrator:{ItemUuid:itemUuid}}});
+         return;
+        }
+        let durUnit = Spellduration.units;
+        let durTime = Spellduration.value;
+        switch(durUnit){
+             case "minute":
+                 durUnit = "seconds"
+                 durTime = durTime*60;
+                 break;
+             case "hour":
+                 durUnit = "seconds"
+                 durTime = durTime*3600;
+                 break;
+             case "day":
+                 durUnit = "seconds"
+                 durTime = durTime*3600*24;
+                 break;
+             case "month":
+                 durUnit = "seconds"
+                 durTime = durTime*3600*24*30;
+                 break;
+             case "year":
+                 durUnit = "seconds"
+                 durTime = durTime*3600*24*30*365;
+             default:
+                 durUnit+="s";
+                 break;
+        }
+        switch(durUnit){
+            case "seconds":
+             case "rounds":
+             case "turns":
+                 await effect.update({duration:{[durUnit]:durTime,startTime: game.time.worldTime},flags:{concentrator:{ItemUuid:itemUuid}}});
+                 break;
+             default:
+                 break;
+        }
+     }
+     static async _removeDependantEffects(uuid,startTime){
+        if(!game.user.isGM){return;}
+       const effects = canvas.tokens.placeables.filter(x=>x.actor.temporaryEffects.length>0)?.map(x=>x.actor?.effects)
+       if(startTime && startTime>0){
+            effects.forEach(async p=>{await p.find(x=>x.data.origin==uuid && x.data.duration.startTime==startTime)?.delete()});
+       } else{
+            effects.forEach(async p=>{await p.find(x=>x.data.origin==uuid)?.delete()});
+        }
+    }
+
 
     /* -------------------------------------------- */
     /*                    Helpers                   */
