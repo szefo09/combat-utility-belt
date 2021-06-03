@@ -221,9 +221,9 @@ export class Concentrator {
         const concentrationItemUuid=actor.effects.find(x=>x.data.label==conditionName)?.data.flags.concentrator?.ItemUuid;
         const concentrationStartTime=actor.effects.find(x=>x.data.label==conditionName)?.data.duration?.startTime;
         if(concentrationItemUuid){
-            Concentrator._removeDependantEffects(concentrationItemUuid,concentrationStartTime);
+            await Concentrator._removeDependantEffects(concentrationItemUuid,concentrationStartTime);
         }
-        await EnhancedConditions.removeCondition(conditionName, entity);
+        return await EnhancedConditions.removeCondition(conditionName, entity);
     }
     /**
      * Distributes concentration prompts to affected users
@@ -399,9 +399,17 @@ export class Concentrator {
         if(!game.user.isGM){return;}
        const effects = canvas.tokens.placeables.filter(x=>x.actor.temporaryEffects.length>0)?.map(x=>x.actor?.effects)
        if(startTime && startTime>0){
-            effects.forEach(async p=>{await p.find(x=>x.data.origin==uuid && x.data.duration.startTime==startTime)?.delete()});
+            return await effects.forEach(async eff=>{const effect = eff.find(e=>e.data.origin==uuid && e.data.duration.startTime==startTime);
+                if(effect){
+                    await effect.parent.deleteEmbeddedEntity("ActiveEffect", effect._id);
+                }
+            });
        } else{
-            effects.forEach(async p=>{await p.find(x=>x.data.origin==uuid)?.delete()});
+            return await effects.forEach(async eff=>{const effect = eff.find(e=>e.data.origin==uuid)
+                if(effect){
+                    await effect.parent.deleteEmbeddedEntity("ActiveEffect", effect._id);
+                }
+            });
         }
     }
 
