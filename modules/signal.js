@@ -81,6 +81,7 @@ export class Signal {
             game.cub.addCondition = EnhancedConditions.addCondition;
             game.cub.removeCondition = EnhancedConditions.removeCondition;
             game.cub.removeAllConditions = EnhancedConditions.removeAllConditions;
+            game.cub.removeConcentration = Concentrator.processFailDC;
 
         });
 

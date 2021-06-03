@@ -207,7 +207,7 @@ export class Concentrator {
      * @param {*} entity 
      */
     static async _processDeath(entity) {
-        await Concentrator._processFailDC(entity);
+        await Concentrator.processFailDC(entity);
 
         return Concentrator._displayDeathChat(entity);
     }
@@ -215,7 +215,7 @@ export class Concentrator {
      * Processes the steps necessary when the concentrating token failed the save DC.
      * @param {*} entity 
      */
-    static async _processFailDC(entity){
+    static async processFailDC(entity){
         const conditionName = Sidekick.getSetting(SETTING_KEYS.concentrator.conditionName);
         const actor = entity instanceof Actor ? entity : (entity instanceof Token || entity instanceof TokenDocument) ? entity.actor : null;
         const concentrationItemUuid=actor.effects.find(x=>x.data.label==conditionName)?.data.flags.concentrator?.ItemUuid;
@@ -285,7 +285,7 @@ export class Concentrator {
                             if(result.total>=dc){
                                 return;
                             }
-                            return Concentrator._processFailDC(entity);
+                            return Concentrator.processFailDC(entity);
                     });
                     }
                 },
