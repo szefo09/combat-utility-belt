@@ -164,11 +164,13 @@ export class Signal {
         /* ------------------- Misc ------------------- */
 
         Hooks.on("renderSettings", (app, html) => {
-            Sidekick.createCUBDiv(html);
-            createCUBPuterButton(html);
-            EnhancedConditions._createLabButton(html);
-            EnhancedConditions._toggleLabButtonVisibility(Sidekick.getSetting(BUTLER.SETTING_KEYS.enhancedConditions.enable));
-            Triggler._createTrigglerButton(html);
+            if(game.user.isGM){
+                Sidekick.createCUBDiv(html);
+                createCUBPuterButton(html);
+                EnhancedConditions._createLabButton(html);
+                EnhancedConditions._toggleLabButtonVisibility(Sidekick.getSetting(BUTLER.SETTING_KEYS.enhancedConditions.enable));
+                Triggler._createTrigglerButton(html);
+            }
         });
 
         Hooks.on("renderImagePopout", (app, html, data) => {
